@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>LLM Query Enhancer Settings</title>
+    <style>
+      body {
+        width: 400px;
+        padding: 20px;
+        font-family: Arial, sans-serif;
+      }
+      .container {
+        margin-bottom: 20px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+      }
+      input[type="text"],
+      textarea {
+        width: 100%;
+        padding: 8px;
+        margin-bottom: 10px;
+      }
+      button {
+        background: #4caf50;
+        color: white;
+        border: none;
+        padding: 10px 15px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #45a049;
+      }
+      .status {
+        margin-top: 10px;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>OpenRouter API Settings</h1>
+      <label for="api-key">OpenRouter API Key:</label>
+      <input type="text" id="api-key" placeholder="sk-or-xxxxxxxxxxxxxxxx" />
+      <small
+        >Get your key from
+        <a href="https://openrouter.ai/keys" target="_blank"
+          >OpenRouter</a
+        ></small
+      >
+    </div>
+
+    <div class="container">
+      <h2>Prompt Enhancement Preferences</h2>
+      <label for="default-model">Default AI Model:</label>
+      <input type="text" id="default-model" value="anthropic/claude-3-sonnet" />
+    </div>
+
+    <button id="save-settings">Save Settings</button>
+    <div id="status" class="status"></div>
+
+    <script src="options.js"></script>
+  </body>
+</html>
