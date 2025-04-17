@@ -6,15 +6,63 @@ const DEFAULT_MODEL = "anthropic/claude-3-sonnet";
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "enhance-prompt",
-    title: "Create Better Prompt with AI",
+    title: "Create Better Prompt",
     contexts: ["selection"],
   });
 });
 
 // Handle context menu clicks
-chrome.contextMenus.onClicked.addListener((info, tab) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "enhance-prompt" && info.selectionText) {
-    handlePromptEnhancement(info.selectionText, tab.id);
+    try {
+      // Set working icon
+      await chrome.action.setIcon({ path: "icons/icon-working.png" });
+
+      // Get API key
+      const { apiKey } = await chrome.storage.local.get(["apiKey"]);
+      if (!apiKey) {
+        await chrome.action.setIcon({ path: "icons/icon-48.png" });
+        chrome.runtime.openOptionsPage();
+        return;
+      }
+
+      // Generate enhanced prompt
+      const enhancedPrompt = await generateEnhancedPrompt(
+        info.selectionText,
+        apiKey
+      );
+
+      // Execute in content script
+      // Function to replace selected text and copy to clipboard
+      function replaceAndCopyText(enhancedPrompt) {
+        const selection = window.getSelection();
+        if (selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          range.insertNode(document.createTextNode(enhancedPrompt));
+
+          // Copy to clipboard
+          navigator.clipboard.writeText(enhancedPrompt).catch((err) => {
+            console.error("Failed to copy text:", err);
+          });
+        }
+      }
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: replaceAndCopyText,
+        args: [enhancedPrompt],
+      });
+
+      // Restore icon
+      await chrome.action.setIcon({ path: "icons/icon-48.png" });
+    } catch (error) {
+      console.error("Error:", error);
+      await chrome.action.setIcon({ path: "icons/icon-error.png" });
+      setTimeout(
+        () => chrome.action.setIcon({ path: "icons/icon-48.png" }),
+        2000
+      );
+    }
   }
 });
 
@@ -25,91 +73,12 @@ chrome.commands.onCommand.addListener(async (command) => {
       active: true,
       currentWindow: true,
     });
-
-    try {
-      const injectionResults = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: getSelectedText,
-      });
-
-      if (injectionResults[0]?.result) {
-        handlePromptEnhancement(injectionResults[0].result, tab.id);
-      }
-    } catch (error) {
-      console.error("Error getting selection:", error);
-      showNotification("Error", "Failed to get selected text");
-    }
+    chrome.tabs.sendMessage(tab.id, { action: "enhanceSelection" });
   }
 });
 
-// Function to get selected text from content script
-function getSelectedText() {
-  return window.getSelection().toString().trim();
-}
-
-// Main enhancement handler
-async function handlePromptEnhancement(text, tabId) {
-  if (!text) {
-    showNotification("Error", "No text selected");
-    return;
-  }
-
-  try {
-    // Show working notification
-    showNotification("Working", "Enhancing your prompt...");
-
-    // Get API key from storage
-    const { apiKey } = await chrome.storage.local.get(["apiKey"]);
-    if (!apiKey) {
-      showNotification("Error", "OpenRouter API key not set");
-      chrome.runtime.openOptionsPage();
-      return;
-    }
-
-    // Generate enhanced prompt using OpenRouter API
-    const enhancedPrompt = await generateEnhancedPrompt(text, apiKey);
-
-    // Copy to clipboard by injecting content script
-    await chrome.scripting.executeScript({
-      target: { tabId: tabId },
-      func: copyToClipboard,
-      args: [enhancedPrompt],
-    });
-
-    showNotification("Success", "Enhanced prompt copied to clipboard!");
-  } catch (error) {
-    console.error("Prompt enhancement failed:", error);
-    showNotification("Error", "Failed to enhance prompt");
-  }
-}
-
-// Function to copy text to clipboard (will be injected into page)
-function copyToClipboard(text) {
-  navigator.clipboard
-    .writeText(text)
-    .then(() => {
-      console.log("Copied to clipboard:", text);
-    })
-    .catch((err) => {
-      console.error("Failed to copy:", err);
-    });
-}
-
-// Generate enhanced prompt using OpenRouter API
+// Generate enhanced prompt
 async function generateEnhancedPrompt(query, apiKey) {
-  const prompt = `You are a prompt enhancement expert. Improve this LLM query:
-  
-Original Query: """${query}"""
-
-Return an enhanced version that:
-1. Is clear and specific
-2. Provides necessary context
-3. Specifies desired output format
-4. Includes examples if helpful
-5. Guides the AI toward better responses
-
-Enhanced Query:`;
-
   const response = await fetch(OPENROUTER_API_URL, {
     method: "POST",
     headers: {
@@ -123,29 +92,43 @@ Enhanced Query:`;
       messages: [
         {
           role: "system",
-          content: "You help users create better LLM prompts.",
+          content: `You are a prompt enhancement assistant. Transform the given input into a well-structured prompt with these sections:
+          1. Introduction: Briefly explain the context
+          2. Background: Provide relevant background information
+          3. Requirements: Clearly state what is needed
+          4. Expected Format: Specify how the response should be structured
+          
+          Return ONLY the enhanced prompt without any introductory phrases like "Here is the enhanced prompt:".
+          The output should be ready to use as-is.`,
         },
-        { role: "user", content: prompt },
+        {
+          role: "user",
+          content: `Enhance this query: ${query}`,
+        },
       ],
       max_tokens: 1000,
       temperature: 0.7,
     }),
   });
 
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
+  const data = await response.json(); // Add this line to define data
+  const enhancedText = data.choices[0]?.message?.content.trim() || query;
+  return enhancedText.replace(/^Here is (?:an? )?.*?:\s*/i, "");
+}
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "processSelection") {
+    generateEnhancedPrompt(request.text, request.apiKey)
+      .then((enhancedText) => {
+        sendResponse({
+          action: "replaceSelection",
+          enhancedText,
+        });
+      })
+      .catch((error) => {
+        console.error("Error enhancing prompt:", error);
+        sendResponse({ error: "Failed to enhance prompt" });
+      });
+    return true; // Keep the message channel open for async response
   }
-
-  const data = await response.json();
-  return data.choices[0]?.message?.content || query;
-}
-
-// Helper function to show notifications
-function showNotification(title, message) {
-  chrome.notifications.create({
-    type: "basic",
-    iconUrl: "icons/icon-48.png",
-    title: title,
-    message: message,
-  });
-}
+});

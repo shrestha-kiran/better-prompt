@@ -13,7 +13,6 @@
     "activeTab",
     "scripting",
     "clipboardWrite",
-    "notifications",
     "contextMenus"
   ],
   "host_permissions": ["https://openrouter.ai/api/*"],
@@ -37,5 +36,12 @@
       },
       "description": "Enhance the selected LLM query"
     }
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ]
 }
